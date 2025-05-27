@@ -1,4 +1,4 @@
--- Settings
+Settings
 local flySpeed = 100
 
 -- Services
@@ -118,7 +118,7 @@ local function runCollector()
 
     keepEquipping = true
 
-    -- Force equip sack loop (every 0.2 seconds for better responsiveness)
+    -- Force equip sack loop
     task.spawn(function()
         while keepEquipping and _G.BondCollectorActive do
             local backpack = player:FindFirstChild("Backpack")
@@ -128,7 +128,7 @@ local function runCollector()
                     humanoid:EquipTool(sack)
                 end
             end
-            task.wait(0.2)
+            task.wait(1)
         end
     end)
 
@@ -211,11 +211,8 @@ local function runCollector()
                 end
                 if not _G.BondCollectorActive then return end
 
-                -- Teleport under the bond and immediately re-equip sack
                 hrp.CFrame = item:GetPivot() - Vector3.new(0, 3, 0)
-                humanoid:EquipTool(player.Backpack:FindFirstChild("Sack"))
                 task.wait(0.2)
-
                 storeItem:FireServer(item)
                 storedBonds[item] = true
                 task.wait(0.2)
@@ -223,7 +220,6 @@ local function runCollector()
                 -- If sack is full, return to original and drop
                 if getSackCount() >= 10 then
                     hrp.CFrame = originalPosition
-                    humanoid:EquipTool(player.Backpack:FindFirstChild("Sack"))
                     task.wait(0.5)
                     for _ = 1, 10 do
                         dropItem:FireServer()
@@ -251,7 +247,6 @@ local function runCollector()
     for _, cf in ipairs(locations) do
         if not _G.BondCollectorActive then break end
         hrp.CFrame = cf
-        humanoid:EquipTool(player.Backpack:FindFirstChild("Sack"))
         task.wait(1)
         checkAndStoreBonds()
     end
@@ -259,7 +254,6 @@ local function runCollector()
     -- Drop any remaining bonds at original position before cleanup
     if _G.BondCollectorActive and getSackCount() > 0 then
         hrp.CFrame = originalPosition
-        humanoid:EquipTool(player.Backpack:FindFirstChild("Sack"))
         task.wait(0.5)
         for _ = 1, 10 do
             dropItem:FireServer()
