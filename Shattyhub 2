@@ -1,267 +1,266 @@
-Settings
-local flySpeed = 100
+local Toggle = ESPTab:CreateToggle({
+    Name = "Bring Gold & Silver",
+    CurrentValue = false,
+    Flag = "BondToggle",
+    Callback = function(state)
+        _G.BondCollectorActive = state
 
--- Services
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        if state then
+            task.spawn(function()
+                local success, err = pcall(function()
+                    -- Services
+                    local Players = game:GetService("Players")
+                    local RunService = game:GetService("RunService")
+                    local UserInputService = game:GetService("UserInputService")
+                    local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Variables
-local player = Players.LocalPlayer
-local char = player.Character or player.CharacterAdded:Wait()
-local hrp = char:WaitForChild("HumanoidRootPart")
-local humanoid = char:WaitForChild("Humanoid")
-local moveDirection = Vector3.zero
-local isSeated = false
-local keepEquipping = false
+                    -- Variables
+                    local player = Players.LocalPlayer
+                    local char = player.Character or player.CharacterAdded:Wait()
+                    local hrp = char:WaitForChild("HumanoidRootPart")
+                    local humanoid = char:WaitForChild("Humanoid")
+                    local moveDirection = Vector3.new(0, 0, 0)
+                    local isSeated = false
+                    local keepEquipping = false
 
--- Store original position for return on toggle off
-local originalPosition = hrp.CFrame
+                    local originalPosition = hrp.CFrame
 
--- Connections to disconnect on stop
-local heartbeatConn, inputBeganConn, inputEndedConn
+                    local heartbeatConn, inputBeganConn, inputEndedConn
 
--- Cleanup function: stop flying, disconnect, unequip sack, return to original position
-local function cleanup()
-    if heartbeatConn then
-        heartbeatConn:Disconnect()
-        heartbeatConn = nil
-    end
-    if inputBeganConn then
-        inputBeganConn:Disconnect()
-        inputBeganConn = nil
-    end
-    if inputEndedConn then
-        inputEndedConn:Disconnect()
-        inputEndedConn = nil
-    end
+                    local collectedBonds = {}
 
-    local bv = hrp:FindFirstChildOfClass("BodyVelocity")
-    local bg = hrp:FindFirstChildOfClass("BodyGyro")
-    if bv then bv:Destroy() end
-    if bg then bg:Destroy() end
+                    local function cleanup()
+                        if heartbeatConn then
+                            heartbeatConn:Disconnect()
+                            heartbeatConn = nil
+                        end
+                        if inputBeganConn then
+                            inputBeganConn:Disconnect()
+                            inputBeganConn = nil
+                        end
+                        if inputEndedConn then
+                            inputEndedConn:Disconnect()
+                            inputEndedConn = nil
+                        end
 
-    keepEquipping = false
+                        local bv = hrp:FindFirstChildOfClass("BodyVelocity")
+                        local bg = hrp:FindFirstChildOfClass("BodyGyro")
+                        if bv then bv:Destroy() end
+                        if bg then bg:Destroy() end
 
-    -- Unequip sack safely
-    if humanoid then
-        humanoid:UnequipTools()
-    end
+                        keepEquipping = false
 
-    -- Teleport back to original position
-    hrp.CFrame = originalPosition
-end
+                        if humanoid then
+                            humanoid:UnequipTools()
+                        end
 
--- Input handlers for WASD movement
-local function onInputBegan(input, processed)
-    if processed or not _G.BondCollectorActive then return end
-    if input.KeyCode == Enum.KeyCode.W then moveDirection += Vector3.new(0, 0, -1)
-    elseif input.KeyCode == Enum.KeyCode.S then moveDirection += Vector3.new(0, 0, 1)
-    elseif input.KeyCode == Enum.KeyCode.A then moveDirection += Vector3.new(-1, 0, 0)
-    elseif input.KeyCode == Enum.KeyCode.D then moveDirection += Vector3.new(1, 0, 0)
-    end
-end
-
-local function onInputEnded(input, processed)
-    if processed or not _G.BondCollectorActive then return end
-    if input.KeyCode == Enum.KeyCode.W then moveDirection -= Vector3.new(0, 0, -1)
-    elseif input.KeyCode == Enum.KeyCode.S then moveDirection -= Vector3.new(0, 0, 1)
-    elseif input.KeyCode == Enum.KeyCode.A then moveDirection -= Vector3.new(-1, 0, 0)
-    elseif input.KeyCode == Enum.KeyCode.D then moveDirection -= Vector3.new(1, 0, 0)
-    end
-end
-
--- Setup and sit in turret seat
-local function setupAndSit()
-    -- Wait for MaximGun and seat to exist
-    while _G.BondCollectorActive and not (workspace:FindFirstChild("RuntimeItems")
-        and workspace.RuntimeItems:FindFirstChild("MaximGun")
-        and workspace.RuntimeItems.MaximGun:FindFirstChildWhichIsA("VehicleSeat")) do
-        hrp.CFrame = CFrame.new(242.746582, 0, -9140.99414)
-        task.wait(0.5)
-    end
-    if not _G.BondCollectorActive then return nil end
-
-    local seat = workspace.RuntimeItems.MaximGun:FindFirstChildWhichIsA("VehicleSeat")
-    hrp.CFrame = seat.CFrame + Vector3.new(0, 3, 0)
-
-    -- Remove old weld if exists
-    local existingWeld = seat:FindFirstChild("SeatWeld")
-    if existingWeld then existingWeld:Destroy() end
-
-    -- Sit in seat
-    repeat
-        seat:Sit(humanoid)
-        task.wait(0.1)
-    until humanoid.Sit and humanoid.SeatPart == seat or not _G.BondCollectorActive
-
-    if not _G.BondCollectorActive then return nil end
-
-    -- Weld HRP to seat
-    local weld = Instance.new("Weld")
-    weld.Name = "SeatWeld"
-    weld.Part0 = seat
-    weld.Part1 = hrp
-    weld.C0 = seat.CFrame:ToObjectSpace(hrp.CFrame)
-    weld.C1 = CFrame.new()
-    weld.Parent = seat
-
-    isSeated = true
-    return seat
-end
-
-local function runCollector()
-    -- Connect input listeners
-    inputBeganConn = UserInputService.InputBegan:Connect(onInputBegan)
-    inputEndedConn = UserInputService.InputEnded:Connect(onInputEnded)
-
-    keepEquipping = true
-
-    -- Force equip sack loop
-    task.spawn(function()
-        while keepEquipping and _G.BondCollectorActive do
-            local backpack = player:FindFirstChild("Backpack")
-            if backpack then
-                local sack = backpack:FindFirstChild("Sack")
-                if sack then
-                    humanoid:EquipTool(sack)
-                end
-            end
-            task.wait(1)
-        end
-    end)
-
-    -- Sit in turret seat
-    local vehicle
-    for _ = 1, 3 do
-        if not _G.BondCollectorActive then break end
-        vehicle = setupAndSit()
-        task.wait(0.5)
-    end
-    if not _G.BondCollectorActive then return end
-
-    -- Setup flying parts
-    cleanup() -- Clear any existing parts first
-
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-    bv.Velocity = Vector3.zero
-    bv.Parent = hrp
-
-    local bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-    bg.P = 10000
-    bg.CFrame = hrp.CFrame
-    bg.Parent = hrp
-
-    heartbeatConn = RunService.Heartbeat:Connect(function()
-        if not _G.BondCollectorActive then
-            cleanup()
-            return
-        end
-        if bv and bg then
-            local velocity = Vector3.zero
-
-            if moveDirection.Magnitude > 0 then
-                local forward = -hrp.CFrame.LookVector
-                local right = hrp.CFrame.RightVector
-                local move = moveDirection.Z * forward + moveDirection.X * right
-                velocity = move.Unit * flySpeed
-            end
-
-            local up = hrp.CFrame.UpVector
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                velocity += up * flySpeed
-            elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-                velocity -= up * flySpeed
-            end
-
-            bv.Velocity = velocity
-        end
-    end)
-
-    -- Helper to get sack count from UI label
-    local function getSackCount()
-        local sack = char:FindFirstChild("Sack")
-        if not sack then return 0 end
-        local label = sack:FindFirstChild("BillboardGui") and sack.BillboardGui:FindFirstChild("TextLabel")
-        if label and label:IsA("TextLabel") then
-            local match = string.match(label.Text, "(%d+)/10")
-            if match then return tonumber(match) end
-        end
-        return 0
-    end
-
-    local runtimeItems = workspace:WaitForChild("RuntimeItems")
-    local storeItem = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StoreItem")
-    local dropItem = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DropItem")
-
-    local storedBonds = {}
-
-    local function checkAndStoreBonds()
-        for _, item in pairs(runtimeItems:GetChildren()) do
-            if not _G.BondCollectorActive then return end
-            local lname = item.Name:lower()
-            if item:IsA("Model") and (lname:find("silverbar") or lname:find("goldbar")) and not storedBonds[item] then
-                -- Sit if not seated
-                if humanoid.SeatPart ~= vehicle then
-                    vehicle:Sit(humanoid)
-                    repeat task.wait() until humanoid.SeatPart == vehicle or not _G.BondCollectorActive
-                end
-                if not _G.BondCollectorActive then return end
-
-                hrp.CFrame = item:GetPivot() - Vector3.new(0, 3, 0)
-                task.wait(0.2)
-                storeItem:FireServer(item)
-                storedBonds[item] = true
-                task.wait(0.2)
-
-                -- If sack is full, return to original and drop
-                if getSackCount() >= 10 then
-                    hrp.CFrame = originalPosition
-                    task.wait(0.5)
-                    for _ = 1, 10 do
-                        dropItem:FireServer()
-                        task.wait(0.1)
-                        if not _G.BondCollectorActive then return end
+                        hrp.CFrame = originalPosition
+                        collectedBonds = {}
+                        isSeated = false
                     end
-                    task.wait(1)
-                end
-            end
+
+                    local function onInputBegan(input, processed)
+                        if processed or not _G.BondCollectorActive then return end
+                        if input.KeyCode == Enum.KeyCode.W then
+                            moveDirection = moveDirection + Vector3.new(0, 0, -1)
+                        elseif input.KeyCode == Enum.KeyCode.S then
+                            moveDirection = moveDirection + Vector3.new(0, 0, 1)
+                        elseif input.KeyCode == Enum.KeyCode.A then
+                            moveDirection = moveDirection + Vector3.new(-1, 0, 0)
+                        elseif input.KeyCode == Enum.KeyCode.D then
+                            moveDirection = moveDirection + Vector3.new(1, 0, 0)
+                        end
+                    end
+
+                    local function onInputEnded(input, processed)
+                        if processed or not _G.BondCollectorActive then return end
+                        if input.KeyCode == Enum.KeyCode.W then
+                            moveDirection = moveDirection - Vector3.new(0, 0, -1)
+                        elseif input.KeyCode == Enum.KeyCode.S then
+                            moveDirection = moveDirection - Vector3.new(0, 0, 1)
+                        elseif input.KeyCode == Enum.KeyCode.A then
+                            moveDirection = moveDirection - Vector3.new(-1, 0, 0)
+                        elseif input.KeyCode == Enum.KeyCode.D then
+                            moveDirection = moveDirection - Vector3.new(1, 0, 0)
+                        end
+                    end
+
+                    local function setupAndSit()
+                        while _G.BondCollectorActive and not (workspace:FindFirstChild("RuntimeItems")
+                            and workspace.RuntimeItems:FindFirstChild("MaximGun")
+                            and workspace.RuntimeItems.MaximGun:FindFirstChildWhichIsA("VehicleSeat")) do
+                            hrp.CFrame = CFrame.new(242.746582, 0, -9140.99414)
+                            task.wait(0.5)
+                        end
+                        if not _G.BondCollectorActive then return nil end
+
+                        local seat = workspace.RuntimeItems.MaximGun:FindFirstChildWhichIsA("VehicleSeat")
+                        hrp.CFrame = seat.CFrame + Vector3.new(0, 3, 0)
+
+                        local existingWeld = seat:FindFirstChild("SeatWeld")
+                        if existingWeld then existingWeld:Destroy() end
+
+                        repeat
+                            seat:Sit(humanoid)
+                            task.wait(0.1)
+                        until humanoid.Sit and humanoid.SeatPart == seat or not _G.BondCollectorActive
+
+                        if not _G.BondCollectorActive then return nil end
+
+                        local weld = Instance.new("Weld")
+                        weld.Name = "SeatWeld"
+                        weld.Part0 = seat
+                        weld.Part1 = hrp
+                        weld.C0 = seat.CFrame:ToObjectSpace(hrp.CFrame)
+                        weld.C1 = CFrame.new()
+                        weld.Parent = seat
+
+                        isSeated = true
+                        return seat
+                    end
+
+                    local function runCollector()
+                        inputBeganConn = UserInputService.InputBegan:Connect(onInputBegan)
+                        inputEndedConn = UserInputService.InputEnded:Connect(onInputEnded)
+
+                        keepEquipping = true
+
+                        task.spawn(function()
+                            while keepEquipping and _G.BondCollectorActive do
+                                local backpack = player:FindFirstChild("Backpack")
+                                if backpack then
+                                    local sack = backpack:FindFirstChild("Sack")
+                                    if sack then
+                                        humanoid:EquipTool(sack)
+                                    end
+                                end
+                                task.wait(1)
+                            end
+                        end)
+
+                        local vehicle
+                        for _ = 1, 3 do
+                            if not _G.BondCollectorActive then break end
+                            vehicle = setupAndSit()
+                            task.wait(0.5)
+                        end
+                        if not _G.BondCollectorActive then return end
+
+                        local bvOld = hrp:FindFirstChildOfClass("BodyVelocity")
+                        local bgOld = hrp:FindFirstChildOfClass("BodyGyro")
+                        if bvOld then bvOld:Destroy() end
+                        if bgOld then bgOld:Destroy() end
+
+                        local bv = Instance.new("BodyVelocity")
+                        bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                        bv.Parent = hrp
+
+                        local bg = Instance.new("BodyGyro")
+                        bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+                        bg.P = 10000
+                        bg.CFrame = hrp.CFrame
+                        bg.Parent = hrp
+
+                        heartbeatConn = RunService.Heartbeat:Connect(function()
+                            if not _G.BondCollectorActive then
+                                cleanup()
+                                return
+                            end
+                            if bv and bg then
+                                local velocity = Vector3.new(0, 0, 0)
+
+                                if moveDirection.Magnitude > 0 then
+                                    local forward = -hrp.CFrame.LookVector
+                                    local right = hrp.CFrame.RightVector
+                                    local move = moveDirection.Z * forward + moveDirection.X * right
+                                    velocity = move.Unit * flySpeed
+                                end
+
+                                local up = hrp.CFrame.UpVector
+                                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                                    velocity = velocity + up * flySpeed
+                                elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+                                    velocity = velocity - up * flySpeed
+                                end
+
+                                bv.Velocity = velocity
+                            end
+                        end)
+
+                        local function getSackCount()
+                            local sack = char:FindFirstChild("Sack")
+                            if not sack then return 0 end
+                            local label = sack:FindFirstChild("BillboardGui") and sack.BillboardGui:FindFirstChild("TextLabel")
+                            if label and label:IsA("TextLabel") then
+                                local match = string.match(label.Text, "(%d+)/10")
+                                if match then return tonumber(match) end
+                            end
+                            return 0
+                        end
+
+                        local runtimeItems = workspace:WaitForChild("RuntimeItems")
+                        local storeItem = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StoreItem")
+                        local dropItem = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DropItem")
+
+                        local function checkAndStoreBonds()
+                            for _, item in pairs(runtimeItems:GetChildren()) do
+                                if not _G.BondCollectorActive then return end
+                                local lname = item.Name:lower()
+                                if item:IsA("Model") and (lname:find("silverbar") or lname:find("goldbar")) and not collectedBonds[item] then
+                                    if humanoid.SeatPart ~= vehicle then
+                                        vehicle:Sit(humanoid)
+                                        repeat task.wait() until humanoid.SeatPart == vehicle or not _G.BondCollectorActive
+                                    end
+                                    if not _G.BondCollectorActive then return end
+
+                                    hrp.CFrame = item:GetPivot() - Vector3.new(0, 3, 0)
+                                    task.wait(0.2)
+                                    storeItem:FireServer(item)
+                                    collectedBonds[item] = true
+                                    task.wait(0.2)
+
+                                    if getSackCount() >= 10 then
+                                        hrp.CFrame = originalPosition
+                                        task.wait(0.5)
+                                        for _ = 1, 10 do
+                                            dropItem:FireServer()
+                                            task.wait(0.1)
+                                            if not _G.BondCollectorActive then return end
+                                        end
+                                        task.wait(1)
+                                    end
+                                end
+                            end
+                        end
+
+                        local locations = {
+                            CFrame.new(621.31, 4.81, 6025.13),
+                            CFrame.new(449.15, 5.13, 6116.59),
+                            CFrame.new(1162.29, 6.47, 6253.13),
+                            CFrame.new(2176.02, 5.95, 5902.95),
+                            CFrame.new(1695.64, 4.77, 5551.65),
+                        }
+
+                        while _G.BondCollectorActive do
+                            for _, loc in ipairs(locations) do
+                                if not _G.BondCollectorActive then break end
+                                hrp.CFrame = loc
+                                task.wait(0.5)
+                                checkAndStoreBonds()
+                                task.wait(0.5)
+                            end
+                        end
+
+                        cleanup()
+                    end
+
+                    runCollector()
+                end)
+                -- Removed warning on failure silently
+            end)
+        else
+            -- Script stops automatically on next check because _G.BondCollectorActive is false
         end
-    end
-
-    local locations = {
-        CFrame.new(621.31, 4.81, 6025.13),
-        CFrame.new(-331.17, 8.12, -2061.88),
-        CFrame.new(63.07, 8.12, -17610.33),
-        CFrame.new(-364.49, 8.12, -25595.66),
-        CFrame.new(-776.61, 8.12, -41706.01),
-        CFrame.new(-649.06, 8.12, 21865.41),
-        CFrame.new(1032.42, 5.61, -30142.53),
-        CFrame.new(200.42, 8.12, -33705.48),
-        CFrame.new(-453.18, 0.35, -48811.12) + Vector3.new(0, 0, -20)
-    }
-
-    for _, cf in ipairs(locations) do
-        if not _G.BondCollectorActive then break end
-        hrp.CFrame = cf
-        task.wait(1)
-        checkAndStoreBonds()
-    end
-
-    -- Drop any remaining bonds at original position before cleanup
-    if _G.BondCollectorActive and getSackCount() > 0 then
-        hrp.CFrame = originalPosition
-        task.wait(0.5)
-        for _ = 1, 10 do
-            dropItem:FireServer()
-            task.wait(0.1)
-            if not _G.BondCollectorActive then break end
-        end
-    end
-
-    cleanup()
-end
-
+    end,
+})
