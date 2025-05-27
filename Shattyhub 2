@@ -265,17 +265,3 @@ local function runCollector()
     cleanup()
 end
 
--- Toggle code (example)
-local Toggle = ESPTab:CreateToggle({
-    Name = "Bring Gold & Silver",
-    CurrentValue = false,
-    Flag = "BondToggle",
-    Callback = function(state)
-        _G.BondCollectorActive = state
-        if state then
-            task.spawn(runCollector)
-        else
-            cleanup()
-        end
-    end,
-})
